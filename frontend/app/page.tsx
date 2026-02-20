@@ -22,6 +22,9 @@ export default function HomePage() {
 
           <div className="flex items-center gap-8">
             <span className="label-sm hidden md:block">AI · Architecture · Design</span>
+            <Link href="/history" className="text-xs tracking-widest uppercase text-[var(--c-text-dim)] hover:text-[var(--c-accent)] transition-colors hidden sm:block">
+              HISTORY
+            </Link>
             <Link href="/generate">
               <button className="c-btn px-5 py-2.5 text-xs tracking-widest uppercase rounded-none flex items-center gap-2">
                 START <ArrowRight size={14} />

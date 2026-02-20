@@ -13,7 +13,8 @@ class GenerateRequest(BaseModel):
             "constraint": "custom",
             "num_inference_steps": 20,
             "guidance_scale": 7.5,
-            "controlnet_conditioning_scale": 0.8
+            "controlnet_conditioning_scale": 0.8,
+            "num_floors": 1
         },
         description="Generation options"
     )

@@ -7,6 +7,8 @@ import { FloorPlanViewer } from '@/components/display/FloorPlanViewer';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { ArrowRight } from 'lucide-react';
 import Link from 'next/link';
+import { useEffect } from 'react';
+import { useHistoryStore } from '@/lib/store/historyStore';
 
 export default function JobPage() {
   const params = useParams();
@@ -17,6 +19,19 @@ export default function JobPage() {
     job?.status === 'completed' ? jobId : null,
     job?.status === 'completed'
   );
+
+  const addEntry = useHistoryStore(s => s.addEntry);
+
+  useEffect(() => {
+    if (result && jobId) {
+      addEntry({
+        jobId,
+        imageUrl: result.output_image_url,
+        metadata: result.metadata,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }, [result, jobId, addEntry]);
 
   // Loading
   if (isLoading) {

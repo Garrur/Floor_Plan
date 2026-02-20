@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image
 from typing import List, Dict, Any, Optional, Tuple
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import torch
 
@@ -62,12 +62,13 @@ class PostProcessor:
             print(f"⚠️  Could not load SAM: {e}")
             self.sam = None
     
-    def process(self, floor_plan_image: Image.Image) -> Dict[str, Any]:
+    def process(self, floor_plan_image: Image.Image, num_floors: int = 1) -> Dict[str, Any]:
         """
         Complete post-processing pipeline.
         
         Args:
             floor_plan_image: Generated floor plan (PIL Image)
+            num_floors: Number of floors to generate logic for
         
         Returns:
             Metadata dict with rooms, walls, validation scores
@@ -88,7 +89,8 @@ class PostProcessor:
         metadata = self._generate_metadata(
             image_np,
             room_polygons,
-            walls
+            walls,
+            num_floors=num_floors
         )
         
         return metadata
@@ -237,13 +239,84 @@ class PostProcessor:
             valid.append(poly)
         
         return valid
+
+    def _generate_furniture_for_room(self, room_type: str, shapely_poly: Polygon, scale_factor: float) -> List[Dict[str, Any]]:
+        import uuid
+        furniture = []
+        bounds = shapely_poly.bounds  # minx, miny, maxx, maxy
+        minx, miny, maxx, maxy = bounds
+        width_px = maxx - minx
+        length_px = maxy - miny
+        
+        # Center of the bounding box
+        cx = minx + width_px / 2
+        cy = miny + length_px / 2
+
+        rtype = room_type.lower()
+        
+        def add_item(ftype, w_ft, l_ft, x_px, y_px, rot):
+            if shapely_poly.contains(Point(x_px, y_px)):
+                furniture.append({
+                    "id": str(uuid.uuid4()),
+                    "type": ftype,
+                    "width": w_ft / scale_factor,
+                    "length": l_ft / scale_factor,
+                    "x": x_px,
+                    "y": y_px,
+                    "rotation": rot
+                })
+        
+        if "bed" in rtype:
+            # Bed (approx 5x6.5 ft)
+            bw, bl = 5.0, 6.5
+            bed_x = cx
+            bed_y = miny + (bl / scale_factor) / 2 + 2
+            add_item("bed", bw, bl, bed_x, bed_y, 0)
+            
+            # Nightstand (1.5x1.5 ft)
+            nw, nl = 1.5, 1.5
+            add_item("nightstand", nw, nl, bed_x - (bw / scale_factor)/2 - (nw / scale_factor)/2 - 1, bed_y - (bl/scale_factor)/2 + (nl/scale_factor)/2, 0)
+            add_item("nightstand", nw, nl, bed_x + (bw / scale_factor)/2 + (nw / scale_factor)/2 + 1, bed_y - (bl/scale_factor)/2 + (nl/scale_factor)/2, 0)
+
+        elif "living" in rtype:
+            # Sofa (7x3 ft)
+            sw, sl = 7.0, 3.0
+            sofa_x = cx
+            sofa_y = maxy - (sl / scale_factor) / 2 - 5
+            add_item("sofa", sw, sl, sofa_x, sofa_y, 180)
+            
+            # Rug (8x10 ft)
+            rw, rl = 8.0, 10.0
+            add_item("rug", rw, rl, cx, sofa_y - (sl/scale_factor)/2 - (rl/scale_factor)/2 + 2, 0)
+            
+            # TV Stand (4x1.5 ft)
+            tw, tl = 4.0, 1.5
+            add_item("tv_stand", tw, tl, cx, miny + (tl / scale_factor) / 2 + 2, 0)
+
+        elif "bath" in rtype:
+            # Toilet (1.5x2 ft)
+            tw, tl = 1.5, 2.0
+            add_item("toilet", tw, tl, minx + (tw/scale_factor)/2 + 3, miny + (tl/scale_factor)/2 + 3, 0)
+            
+            # Tub (2.5x5 ft)
+            tubw, tubl = 2.5, 5.0
+            add_item("tub", tubw, tubl, maxx - (tubw/scale_factor)/2 - 2, maxy - (tubl/scale_factor)/2 - 2, 0)
+
+        elif "kitchen" in rtype or "dining" in rtype:
+            if "dining" in rtype or shapely_poly.area * (scale_factor**2) > 200:
+                add_item("dining_table", 6.0, 3.0, cx, cy, 0)
+            else:
+                add_item("island", 4.0, 2.5, cx, cy, 0)
+
+        return furniture
     
     def _generate_metadata(
         self,
         image: np.ndarray,
         room_polygons: List[np.ndarray],
         walls: List[Dict[str, Any]],
-        scale_factor: float = 2.0
+        scale_factor: float = 2.0,
+        num_floors: int = 1
     ) -> Dict[str, Any]:
         """
         Generate structured metadata.
@@ -253,6 +326,7 @@ class PostProcessor:
             room_polygons: List of room polygons
             walls: List of walls
             scale_factor: Pixels to feet conversion
+            num_floors: Number of floors to duplicate and stack
         
         Returns:
             Complete metadata dict
@@ -269,24 +343,67 @@ class PostProcessor:
             "validation": {}
         }
         
-        # Process rooms
-        for i, poly in enumerate(room_polygons):
-            shapely_poly = Polygon(poly)
-            
-            room = {
-                "id": i + 1,
-                "type": "room",  # TODO: Classify room type
-                "polygon": poly.tolist(),
-                "centroid": list(shapely_poly.centroid.coords[0]),
-                "area_pixels": int(shapely_poly.area),
-                "area_sqft": int(shapely_poly.area * (scale_factor ** 2)),
-                "perimeter_pixels": int(shapely_poly.length),
-                "bounding_box": list(shapely_poly.bounds),
-                "convexity": round(shapely_poly.area / shapely_poly.convex_hull.area, 2)
-            }
-            
-            metadata["rooms"].append(room)
-            metadata["total_area_sqft"] += room["area_sqft"]
+        # Process rooms across floors
+        global_room_id = 1
+        for floor_idx in range(1, num_floors + 1):
+            for i, poly in enumerate(room_polygons):
+                shapely_poly = Polygon(poly)
+                
+                room_type = "room" # TODO: Classify room type
+                
+                # Temporary mock room type classification based on size for demo purposes
+                if shapely_poly.area * (scale_factor ** 2) > 400:
+                    room_type = "Living Room"
+                elif shapely_poly.area * (scale_factor ** 2) > 150:
+                    room_type = "Bedroom"
+                else:
+                    room_type = "Bathroom"
+
+                room = {
+                    "id": global_room_id,
+                    "floor": floor_idx,
+                    "type": room_type,
+                    "polygon": poly.tolist(),
+                    "centroid": list(shapely_poly.centroid.coords[0]),
+                    "area_pixels": int(shapely_poly.area),
+                    "area_sqft": int(shapely_poly.area * (scale_factor ** 2)),
+                    "perimeter_pixels": int(shapely_poly.length),
+                    "bounding_box": list(shapely_poly.bounds),
+                    "convexity": round(shapely_poly.area / shapely_poly.convex_hull.area, 2),
+                    "insights": [],
+                    "furniture": self._generate_furniture_for_room(room_type, shapely_poly, scale_factor)
+                }
+
+                # Generate Insights
+                sqft = room["area_sqft"]
+                rtype = room["type"].lower()
+
+                if "living" in rtype:
+                    if sqft > 300:
+                        room["insights"].append("Large space: Consider floating your furniture away from the walls to create a more intimate seating area.")
+                        room["insights"].append("Add a large central rug (at least 8x10) to anchor the open room.")
+                    else:
+                        room["insights"].append("Use a sectional sofa against the longest wall to maximize floor space.")
+                elif "bed" in rtype:
+                    if sqft > 200:
+                        room["insights"].append("Spacious primary suite: You have room for a king-size bed and a dedicated seating or reading nook by the window.")
+                    else:
+                        room["insights"].append("Opt for a queen-size bed centered on the main wall with two slim nightstands.")
+                        room["insights"].append("Consider wall-sconces instead of table lamps to save surface space.")
+                elif "bath" in rtype:
+                    room["insights"].append("Consider a large, unframed mirror to bounce light and make the space feel larger.")
+                    if sqft > 80:
+                        room["insights"].append("You have sufficient space for a double vanity or a freestanding soaking tub.")
+                    else:
+                        room["insights"].append("Use a glass walk-in shower enclosure to keep sightlines open.")
+                
+                # Universal insight based on geometric convexity
+                if room["convexity"] < 0.75:
+                    room["insights"].append("This room has a unique, non-rectangular shape. Use custom built-in shelving or a corner desk in the alcove.")
+
+                metadata["rooms"].append(room)
+                metadata["total_area_sqft"] += room["area_sqft"]
+                global_room_id += 1
         
         # Process walls
         for i, wall in enumerate(walls):

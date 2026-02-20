@@ -1,0 +1,168 @@
+import jsPDF from 'jspdf';
+import { FloorPlanMetadata } from '@/types/api';
+
+export async function exportFloorPlanPDF(
+  imageUrl: string,
+  metadata?: FloorPlanMetadata
+) {
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const margin = 20;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  // --- Header ---
+  pdf.setFillColor(10, 10, 10);
+  pdf.rect(0, 0, pageWidth, 45, 'F');
+
+  pdf.setTextColor(200, 149, 108); // copper accent
+  pdf.setFontSize(8);
+  pdf.setFont('helvetica', 'normal');
+  pdf.text('AI FLOOR PLAN GENERATOR', margin, 18);
+
+  pdf.setTextColor(232, 228, 222); // light text
+  pdf.setFontSize(22);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('Floor Plan Report', margin, 32);
+
+  pdf.setFontSize(8);
+  pdf.setTextColor(112, 107, 99);
+  pdf.text(new Date().toLocaleDateString('en-US', { 
+    year: 'numeric', month: 'long', day: 'numeric' 
+  }), pageWidth - margin, 32, { align: 'right' });
+
+  y = 55;
+
+  // --- Floor Plan Image ---
+  try {
+    const img = await loadImage(imageUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    const imgData = canvas.toDataURL('image/png');
+
+    const imgAspect = img.naturalHeight / img.naturalWidth;
+    const imgWidth = contentWidth;
+    const imgHeight = imgWidth * imgAspect;
+    const maxImgHeight = 120;
+    const finalHeight = Math.min(imgHeight, maxImgHeight);
+    const finalWidth = finalHeight === maxImgHeight ? maxImgHeight / imgAspect : imgWidth;
+    const imgX = margin + (contentWidth - finalWidth) / 2;
+
+    pdf.setDrawColor(200, 149, 108);
+    pdf.setLineWidth(0.5);
+    pdf.rect(imgX - 2, y - 2, finalWidth + 4, finalHeight + 4);
+    pdf.addImage(imgData, 'PNG', imgX, y, finalWidth, finalHeight);
+    y += finalHeight + 15;
+  } catch (e) {
+    pdf.setTextColor(180, 87, 87);
+    pdf.setFontSize(10);
+    pdf.text('Floor plan image could not be loaded', margin, y);
+    y += 15;
+  }
+
+  // --- Metadata Summary ---
+  if (metadata) {
+    pdf.setFillColor(20, 20, 20);
+    pdf.rect(margin, y, contentWidth, 30, 'F');
+
+    const cols = 4;
+    const colWidth = contentWidth / cols;
+    const stats = [
+      { label: 'TOTAL AREA', value: `${metadata.total_area_sqft?.toLocaleString() ?? '—'} sq ft` },
+      { label: 'ROOMS', value: `${metadata.rooms?.length ?? '—'}` },
+      { label: 'BEDROOMS', value: `${metadata.num_bedrooms ?? '—'}` },
+      { label: 'BATHROOMS', value: `${metadata.num_bathrooms ?? '—'}` },
+    ];
+
+    stats.forEach((stat, i) => {
+      const x = margin + colWidth * i + colWidth / 2;
+      pdf.setTextColor(112, 107, 99);
+      pdf.setFontSize(6);
+      pdf.text(stat.label, x, y + 10, { align: 'center' });
+      pdf.setTextColor(232, 228, 222);
+      pdf.setFontSize(14);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(stat.value, x, y + 22, { align: 'center' });
+      pdf.setFont('helvetica', 'normal');
+    });
+
+    y += 40;
+
+    // --- Quality Score ---
+    if (metadata.validation) {
+      const score = Math.round(metadata.validation.spatial_consistency_score * 100);
+      pdf.setTextColor(200, 149, 108);
+      pdf.setFontSize(8);
+      pdf.text('QUALITY SCORE', margin, y);
+      pdf.setFontSize(16);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text(`${score}%`, margin + 40, y);
+      pdf.setFont('helvetica', 'normal');
+      y += 15;
+    }
+
+    // --- Room Details Table ---
+    if (metadata.rooms && metadata.rooms.length > 0) {
+      pdf.setTextColor(200, 149, 108);
+      pdf.setFontSize(8);
+      pdf.text('ROOM BREAKDOWN', margin, y);
+      y += 8;
+
+      // Table header
+      pdf.setFillColor(20, 20, 20);
+      pdf.rect(margin, y, contentWidth, 8, 'F');
+      pdf.setTextColor(112, 107, 99);
+      pdf.setFontSize(7);
+      pdf.text('ROOM TYPE', margin + 4, y + 5.5);
+      pdf.text('AREA', margin + 80, y + 5.5);
+      pdf.text('DIMENSIONS', margin + 120, y + 5.5);
+      y += 10;
+
+      // Table rows
+      metadata.rooms.forEach((room, i) => {
+        if (y > 270) {
+          pdf.addPage();
+          y = margin;
+        }
+        if (i % 2 === 0) {
+          pdf.setFillColor(15, 15, 15);
+          pdf.rect(margin, y - 2, contentWidth, 8, 'F');
+        }
+        pdf.setTextColor(232, 228, 222);
+        pdf.setFontSize(8);
+        pdf.text(room.type || `Room ${i + 1}`, margin + 4, y + 3.5);
+        pdf.text(`${room.area_sqft} sq ft`, margin + 80, y + 3.5);
+        if (room.dimensions) {
+          pdf.text(`${room.dimensions.width_ft}' × ${room.dimensions.length_ft}'`, margin + 120, y + 3.5);
+        }
+        y += 8;
+      });
+    }
+  }
+
+  // --- Footer ---
+  const footerY = pdf.internal.pageSize.getHeight() - 10;
+  pdf.setDrawColor(200, 149, 108);
+  pdf.setLineWidth(0.3);
+  pdf.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+  pdf.setTextColor(74, 70, 64);
+  pdf.setFontSize(6);
+  pdf.text('Generated by FloorPlan AI · floorplan-ai.vercel.app', margin, footerY);
+  pdf.text(`Page 1`, pageWidth - margin, footerY, { align: 'right' });
+
+  // Save
+  pdf.save(`floor-plan-${Date.now()}.pdf`);
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}

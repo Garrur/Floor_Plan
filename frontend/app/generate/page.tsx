@@ -15,6 +15,7 @@ export default function GeneratePage() {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState<File | null>(null);
   const [constraint, setConstraint] = useState('custom');
+  const [numFloors, setNumFloors] = useState<number>(1);
   
   const { uploadImage, uploading, error: uploadError } = useUpload();
   const generateMutation = useGeneration();
@@ -33,7 +34,10 @@ export default function GeneratePage() {
       const job = await generateMutation.mutateAsync({
         image_url: imageUrl,
         user_id: userId,
-        options: { constraint },
+        options: { 
+          constraint,
+          num_floors: numFloors
+        },
       });
       router.push(`/generate/${job.job_id}`);
     } catch (error) {
@@ -97,6 +101,25 @@ export default function GeneratePage() {
             </p>
 
             <ConstraintSelector onSelect={setConstraint} defaultValue={constraint} />
+
+            <div className="mt-8">
+              <h2 className="label-sm text-[var(--c-text)] mb-3">BUILDING HEIGHT</h2>
+              <div className="grid grid-cols-3 gap-px bg-[var(--c-border)]">
+                {[1, 2, 3].map(floors => (
+                  <button
+                    key={floors}
+                    onClick={() => setNumFloors(floors)}
+                    className={`p-4 text-center transition-all duration-300 ${
+                      numFloors === floors 
+                        ? 'bg-[var(--c-surface-2)] text-[var(--c-accent)] font-bold' 
+                        : 'bg-[var(--c-surface)] text-[var(--c-text)] hover:bg-[var(--c-surface-2)]'
+                    }`}
+                  >
+                    {floors} {floors === 1 ? 'STORY' : 'STORIES'}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div className="flex gap-4 mt-10">
               <button

@@ -105,7 +105,8 @@ async def run_inference_pipeline(
                 
                 from app.models.post_processor import PostProcessor
                 post_processor = PostProcessor()
-                metadata = post_processor.process(layout_image)
+                num_floors = options.get("num_floors", 1)
+                metadata = post_processor.process(layout_image, num_floors)
                 update_progress("post_processing", 0.90)
                 
             except Exception as model_error:
@@ -132,7 +133,8 @@ async def run_inference_pipeline(
             await asyncio.sleep(0.5)
             update_progress("post_processing", 0.80)
             
-            metadata = _generate_demo_metadata(input_image, extra_seed=image_url)
+            num_floors = options.get("num_floors", 1)
+            metadata = _generate_demo_metadata(input_image, extra_seed=image_url, num_floors=num_floors)
             update_progress("post_processing", 0.90)
         
         # Stage 5: Upload results
@@ -374,7 +376,7 @@ def _layout_compact(m, w, h, rng):
     return rooms
 
 
-def _generate_demo_metadata(input_image: Image.Image, extra_seed: str = "") -> Dict[str, Any]:
+def _generate_demo_metadata(input_image: Image.Image, extra_seed: str = "", num_floors: int = 1) -> Dict[str, Any]:
     """Generate varied demo metadata based on input image."""
     import hashlib
     import random
@@ -400,24 +402,29 @@ def _generate_demo_metadata(input_image: Image.Image, extra_seed: str = "") -> D
     total_area = rng.randint(800, 3200)
     
     rooms = []
-    remaining = total_area
-    for i, name in enumerate(room_names):
-        if i == len(room_names) - 1:
-            area = remaining
-        else:
-            area = rng.randint(int(remaining * 0.1), int(remaining * 0.35))
-            remaining -= area
-        
-        room_type = name.lower().replace(" ", "_")
-        if room_type.startswith("bedroom"):
-            room_type = "bedroom"
-        
-        rooms.append({
-            "id": i + 1,
-            "type": room_type,
-            "area_sqft": area,
-            "label": name,
-        })
+    global_room_id = 1
+    
+    for floor_idx in range(1, num_floors + 1):
+        remaining = total_area
+        for i, name in enumerate(room_names):
+            if i == len(room_names) - 1:
+                area = remaining
+            else:
+                area = rng.randint(int(remaining * 0.1), int(remaining * 0.35))
+                remaining -= area
+            
+            room_type = name.lower().replace(" ", "_")
+            if room_type.startswith("bedroom"):
+                room_type = "bedroom"
+            
+            rooms.append({
+                "id": global_room_id,
+                "floor": floor_idx,
+                "type": room_type,
+                "area_sqft": area,
+                "label": name,
+            })
+            global_room_id += 1
     
     num_bedrooms = sum(1 for r in rooms if "bedroom" in r["type"].lower())
     num_bathrooms = sum(1 for r in rooms if "bathroom" in r["type"].lower())
@@ -429,7 +436,7 @@ def _generate_demo_metadata(input_image: Image.Image, extra_seed: str = "") -> D
         "layout_type": layout_type,
         "image_size": [512, 512],
         "scale_factor": round(rng.uniform(1.5, 3.0), 1),
-        "total_area_sqft": total_area,
+        "total_area_sqft": total_area * num_floors,
         "num_rooms": len(rooms),
         "num_bedrooms": num_bedrooms,
         "num_bathrooms": num_bathrooms,

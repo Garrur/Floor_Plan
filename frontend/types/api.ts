@@ -1,11 +1,22 @@
 // API Request and Response Types
 
+export interface FurnitureItem {
+  id: string;
+  type: string;
+  width: number;
+  length: number;
+  x: number;
+  y: number;
+  rotation: number;
+}
+
 export interface GenerateRequest {
   image_url: string;
   user_id: string;
   options?: {
     constraint?: string;
     num_inference_steps?: number;
+    num_floors?: number;
   };
 }
 
@@ -34,6 +45,9 @@ export interface RoomMetadata {
     width_ft: number;
     length_ft: number;
   };
+  insights?: string[];
+  floor: number;
+  furniture?: FurnitureItem[];
 }
 
 export interface FloorPlanMetadata {

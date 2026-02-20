@@ -120,6 +120,19 @@ Floor_Plan/
 
 ---
 
+## 🗺️ Roadmap (Future Features)
+
+Here are several high-impact features planned to enhance the AI Floor Plan Generator:
+
+- [ ] **Professional PDF "Project Report" Export:** Generate a multi-page PDF including the original photo, 2D layout, 3D render snapshot, and the full Cost Estimator table.
+- [ ] **Enhanced 2D Editor (Mini-CAD):** Expand the interactive editor to allow users to change room types (e.g., Bedroom to Office) and drag-and-drop doors/windows onto polygon walls.
+- [ ] **Split-Screen Pro Dashboard:** View the 2D Editor and 3D Viewer side-by-side, with real-time 3D extrusion updates as users drag 2D walls.
+- [ ] **AI Interior Design & Furniture:** Automatically suggest furniture placement overlays based on the identified room type, or use LLMs to suggest interior design styles based on the exterior photo.
+- [ ] **Shareable "Client" Links:** Generate read-only viewer routes for architects to share the 3D model and Cost Estimator with clients without allowing edits.
+- [ ] **Multi-story Generation:** Add support for "Floors" in the constraints panel to generate and stack multiple floor layouts in the 3D viewer.
+
+---
+
 ## 🎨 Demo Mode
 
 When no GPU is available, the app runs in **demo mode** — generating varied floor plans using deterministic seeding based on the input image. Different images produce different layouts.
